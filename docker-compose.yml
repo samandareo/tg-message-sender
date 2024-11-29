@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: tg-message-sender
+    volumes:
+      - .:/app
+      - sessions_data:/app/message_sender/sessions
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=message_sender.settings
+      - DJANGO_DEBUG=1
+    restart: unless-stopped
+
+volumes:
+  sessions_data:
+    name: tg-sessions
