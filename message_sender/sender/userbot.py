@@ -54,30 +54,58 @@ async def process_account(
     account_data: Dict[str, Any],
     data: pd.DataFrame,
     message: str,
-    stop_flag: bool
+    stop_flag: bool = None
 ) -> int:
     """Process a single account's messages."""
-    if not account_data['status'] or stop_flag:
+    from sender.views import stop_thread  # Import here to avoid circular import
+    
+    if not account_data['status'] or stop_thread:
+        logger.info(f"Account {account_id} is inactive or stop requested before start")
         return 0
 
     config = TelegramConfig(account_data['api_id'], account_data['api_hash'])
     messages_sent = 0
 
-    async with TelegramSession(config) as client:
-        sender = MessageSender(client)
-        logger.info(f"Processing messages for {account_id}")
+    try:
+        async with TelegramSession(config) as client:
+            sender = MessageSender(client)
+            logger.info(f"Processing messages for {account_id}")
 
-        for index, row in data.iterrows():
-            if stop_flag or messages_sent >= MESSAGES_PER_ACCOUNT:
-                break
+            for index, row in data.iterrows():
+                # Check stop flag before each message
+                if stop_thread:
+                    logger.info(f"Stop requested for {account_id} after {messages_sent} messages")
+                    break
 
-            if await sender.send_message(row['Name'], row['Username'], message):
-                messages_sent += 1
-                await asyncio.sleep(DELAY_BETWEEN_MESSAGES)
+                if messages_sent >= MESSAGES_PER_ACCOUNT:
+                    logger.info(f"Reached message limit for {account_id}")
+                    break
 
-        await NOTIFICATION_SERVICE.send_notification(
-            f"{account_id} sent: {messages_sent} messages"
-        )
+                try:
+                    # Check stop flag before sending
+                    if stop_thread:
+                        break
+                        
+                    if await sender.send_message(row['Name'], row['Username'], message):
+                        messages_sent += 1
+                        # Check stop flag before delay
+                        if stop_thread:
+                            break
+                        await asyncio.sleep(DELAY_BETWEEN_MESSAGES)
+                except Exception as e:
+                    logger.error(f"Error sending message from {account_id}: {e}")
+                    continue
+
+            # Final notification
+            if messages_sent > 0:
+                await NOTIFICATION_SERVICE.send_notification(
+                    f"{account_id} sent: {messages_sent} messages"
+                )
+    except Exception as e:
+        logger.error(f"Error in process_account for {account_id}: {e}")
+    finally:
+        if stop_thread:
+            logger.info(f"Account {account_id} stopped. Messages sent: {messages_sent}")
 
     return messages_sent
 
@@ -96,7 +124,7 @@ async def receive_data(data: pd.DataFrame, message: str) -> None:
             break
 
         messages_sent = await process_account(
-            account_id, account_data, data, message, stop_thread
+            account_id, account_data, data, message
         )
         
         if messages_sent > 0:

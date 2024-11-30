@@ -39,8 +39,7 @@ class ThreadManager:
         global background_thread, stop_thread
         if background_thread and background_thread.is_alive():
             stop_thread = True
-            background_thread.join()
-            background_thread = None
+            # Don't join the thread, just set the flag and let it stop naturally
             return True
         return False
 
